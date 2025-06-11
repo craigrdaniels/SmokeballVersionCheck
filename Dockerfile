@@ -16,5 +16,5 @@ RUN crontab /etc/cron.d/smokeball-cron-job
 
 RUN touch /var/log/cron.log
 
-CMD cron -f && tail -f /var/log/cron.log
+CMD ["sh", "-c", "cron -f & tail -f /var/log/cron.log"]
 
