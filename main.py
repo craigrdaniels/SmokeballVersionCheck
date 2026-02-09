@@ -44,26 +44,45 @@ def send_email_notification(
 
 def get_download_url(web_url):
     response = requests.get(web_url)
-    html = response.text.replace("\n", " ")
-    match = re.search(
-        r'<a[^>]*href="([^"]+)"[^>]*>Download\s+Smokeball\s+-\s+AU', html, re.IGNORECASE
+    html = response.text
+
+    # Find all links with the class "main-cta-orange"
+    links = re.findall(
+        r'<a[^>]*href="([^"]*)"[^>]*class="[^"]*main-cta-orange[^"]*"[^>]*>(.*?)</a>',
+        html,
+        re.DOTALL | re.IGNORECASE,
     )
 
-    if match:
-        return urljoin(web_url, match.group(1))
+    for href, content in links:
+        if "DOWNLOAD AU" in content:
+            download_url = urljoin(web_url, href)
+            print(f"Found download link: {download_url}")
+            return download_url
 
     return None
 
 
-def get_filename_from_url(url):
+def get_version_info(url):
+    """Returns (version_number, filename)"""
     response = requests.head(url, allow_redirects=True)
+    final_url = response.url
+
+    # Try to determine filename
     cd = response.headers.get("Content-Disposition", "")
-    match = re.search(r'filename="?([^";\r\n]+)"?', cd)
+    filename_match = re.search(r'filename="?([^";\r\n]+)"?', cd)
+    if filename_match:
+        filename = filename_match.group(1)
+    else:
+        filename = os.path.basename(urlparse(final_url).path)
 
-    if match:
-        return match.group(1)
+    # Extract version number (e.g., 9.14.13) from URL or filename
+    version_match = re.search(r"(\d+\.\d+\.\d+)", final_url)
+    if not version_match:
+        version_match = re.search(r"(\d+\.\d+\.\d+)", filename)
 
-    return os.path.basename(urlparse(response.url).path)
+    version = version_match.group(1) if version_match else filename
+
+    return version, filename
 
 
 def read_version_file(version_file):
@@ -85,25 +104,26 @@ def main():
         return
 
     print(f"Download URL: {url}")
-    filename = get_filename_from_url(url)
+    version, filename = get_version_info(url)
 
-    if not filename:
-        print("Could not determine filename from URL. Exiting.")
+    if not version:
+        print("Could not determine version. Exiting.")
         return
 
-    print(f"Latest version filename: {filename}")
+    print(f"Latest version: {version}")
+    print(f"Filename: {filename}")
 
     stored_version = read_version_file(VERSION_FILE)
 
-    if stored_version == filename:
-        print("No new version. Exiting.")
+    if stored_version == version:
+        print(f"No new version (Current: {version}). Exiting.")
         return
     else:
-        print("New version found!")
-        write_version_file(VERSION_FILE, filename)
+        print(f"New version found: {version} (Stored: {stored_version})")
+        write_version_file(VERSION_FILE, version)
         send_email_notification(
             subject="New Smokeball Version Available",
-            body=f"A new version of Smokeball is available: {filename}\nDownload it here: {url}",
+            body=f"A new version of Smokeball is available: {version}\nFilename: {filename}\nDownload it here: {url}",
             to_email=os.getenv("TO_EMAIL"),
             from_email=os.getenv("FROM_EMAIL"),
             smtp_server=os.getenv("SMTP_SERVER"),
